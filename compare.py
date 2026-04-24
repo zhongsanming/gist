@@ -8,10 +8,25 @@ Usage:
   
 import json  
 import sys  
-from typing import Dict, Tuple, List  
-from collections import defaultdict  
+from typing import Dict, Tuple, List, Optional  
   
-from benchmark.attri_util import BenchmarkResult, BenchmarkMetrics  
+  
+class BenchmarkMetrics:  
+    """Simplified version of BenchmarkMetrics for comparison."""  
+    def __init__(self, data: dict):  
+        self.shape_detail = data.get("shape_detail", [])  
+        self.latency = data.get("latency")  
+        self.error_msg = data.get("error_msg")  
+  
+  
+class BenchmarkResult:  
+    """Simplified version of BenchmarkResult for comparison."""  
+    def __init__(self, data: dict):  
+        self.op_name = data["op_name"]  
+        self.dtype = data["dtype"]  
+        self.mode = data["mode"]  
+        self.level = data["level"]  
+        self.result = [BenchmarkMetrics(m) for m in data["result"]]  
   
   
 def parse_log(log_file_path: str) -> List[BenchmarkResult]:  
@@ -28,26 +43,7 @@ def parse_log(log_file_path: str) -> List[BenchmarkResult]:
         if line.startswith("[INFO]"):  
             json_str = line[len("[INFO] ") :]  
             data = json.loads(json_str)  
-            benchmark_result = BenchmarkResult(  
-                op_name=data["op_name"],  
-                dtype=data["dtype"],  
-                mode=data["mode"],  
-                level=data["level"],  
-                result=[  
-                    BenchmarkMetrics(  
-                        legacy_shape=metric.get("legacy_shape"),  
-                        shape_detail=metric.get("shape_detail", []),  
-                        latency_base=metric.get("latency_base"),  
-                        latency=metric.get("latency"),  
-                        speedup=metric.get("speedup"),  
-                        accuracy=metric.get("accuracy"),  
-                        tflops=metric.get("tflops"),  
-                        utilization=metric.get("utilization"),  
-                        error_msg=metric.get("error_msg"),  
-                    )  
-                    for metric in data["result"]  
-                ],  
-            )  
+            benchmark_result = BenchmarkResult(data)  
             benchmark_results.append(benchmark_result)  
       
     return benchmark_results  
@@ -108,12 +104,14 @@ def print_comparison(comparisons: Dict[str, Tuple[float, float, float]]):
     print(f"{'Operation':<30} {'Shape':<25} {'Run1 (ms)':<12} {'Run2 (ms)':<12} {'Change (%)':<12}")  
     print("-" * 120)  
       
-    # Group by operation  
-    by_op = defaultdict(list)  
+    # Group by operation using regular dict  
+    by_op = {}  
     for key, (lat1, lat2, change) in comparisons.items():  
         parts = key.split('_')  
         op_name = '_'.join(parts[:-4])  # Reconstruct op name  
         shape = parts[-1]  
+        if op_name not in by_op:  
+            by_op[op_name] = []  
         by_op[op_name].append((shape, lat1, lat2, change))  
       
     for op_name in sorted(by_op.keys()):  
