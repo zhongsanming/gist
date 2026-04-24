@@ -52,16 +52,25 @@ def parse_log(log_file_path: str) -> List[BenchmarkResult]:
 def get_result_key(result: BenchmarkResult, metric: BenchmarkMetrics) -> str:  
     """Generate unique key for matching results across runs."""  
     shape_str = str(metric.shape_detail) if metric.shape_detail else "None"  
+    # Include dtype in the key for proper matching  
     return f"{result.op_name}_{result.dtype}_{result.mode}_{result.level}_{shape_str}"  
   
   
+def format_shape_with_dtype(shape_detail: List, dtype: str) -> str:  
+    """Format shape detail with dtype for display."""  
+    shape_str = str(shape_detail) if shape_detail else "N/A"  
+    # Extract short dtype name (e.g., "float16" from "torch.float16")  
+    dtype_short = dtype.split(".")[-1] if "." in dtype else dtype  
+    return f"{shape_str} ({dtype_short})"  
+  
+  
 def compare_latencies(run1_results: List[BenchmarkResult],   
-                     run2_results: List[BenchmarkResult]) -> Dict[str, Tuple[float, float, float]]:  
+                     run2_results: List[BenchmarkResult]) -> Dict[str, Tuple[float, float, float, str, str]]:  
     """  
     Compare latencies between two runs.  
       
     Returns:  
-        Dict mapping key to (latency1, latency2, percent_change)  
+        Dict mapping key to (latency1, latency2, percent_change, shape_detail, dtype)  
     """  
     # Build lookup tables  
     run1_lookup = {}  
@@ -69,72 +78,94 @@ def compare_latencies(run1_results: List[BenchmarkResult],
         for metric in result.result:  
             if metric.latency is not None and metric.error_msg is None:  
                 key = get_result_key(result, metric)  
-                run1_lookup[key] = metric.latency  
+                run1_lookup[key] = (metric.latency, metric.shape_detail, result.dtype)  
       
     run2_lookup = {}  
     for result in run2_results:  
         for metric in result.result:  
             if metric.latency is not None and metric.error_msg is None:  
                 key = get_result_key(result, metric)  
-                run2_lookup[key] = metric.latency  
+                run2_lookup[key] = (metric.latency, metric.shape_detail, result.dtype)  
       
     # Compare latencies  
     comparisons = {}  
     all_keys = set(run1_lookup.keys()) | set(run2_lookup.keys())  
       
     for key in all_keys:  
-        lat1 = run1_lookup.get(key, None)  
-        lat2 = run2_lookup.get(key, None)  
+        run1_data = run1_lookup.get(key)  
+        run2_data = run2_lookup.get(key)  
           
-        if lat1 is not None and lat2 is not None:  
+        if run1_data and run2_data:  
+            lat1, shape1, dtype1 = run1_data  
+            lat2, shape2, dtype2 = run2_data  
             percent_change = ((lat2 - lat1) / lat1) * 100  
-            comparisons[key] = (lat1, lat2, percent_change)  
-        elif lat1 is not None:  
-            comparisons[key] = (lat1, None, -100.0)  # Missing in run2  
-        elif lat2 is not None:  
-            comparisons[key] = (None, lat2, 100.0)   # Missing in run1  
+            comparisons[key] = (lat1, lat2, percent_change, shape1, dtype1)  
+        elif run1_data:  
+            lat1, shape1, dtype1 = run1_data  
+            comparisons[key] = (lat1, None, -100.0, shape1, dtype1)  # Missing in run2  
+        elif run2_data:  
+            lat2, shape2, dtype2 = run2_data  
+            comparisons[key] = (None, lat2, 100.0, shape2, dtype2)   # Missing in run1  
       
     return comparisons  
   
   
-def print_comparison(comparisons: Dict[str, Tuple[float, float, float]]):  
+def print_comparison(comparisons: Dict[str, Tuple[float, float, float, List, str]]):  
     """Print comparison results in a formatted table."""  
-    print("\nLatency Comparison Results:")  
-    print("-" * 120)  
-    print(f"{'Operation':<30} {'Shape':<25} {'Run1 (ms)':<12} {'Run2 (ms)':<12} {'Change (%)':<12}")  
-    print("-" * 120)  
+    print("\n" + "=" * 140)  
+    print(f"{'Operation':<25} {'Run1 (ms)':<12} {'Run2 (ms)':<12} {'Change (%)':<12} {'Shape & Dtype':<70}")  
+    print("=" * 140)  
       
     # Group by operation using regular dict  
     by_op = {}  
-    for key, (lat1, lat2, change) in comparisons.items():  
+    for key, (lat1, lat2, change, shape, dtype) in comparisons.items():  
         parts = key.split('_')  
         op_name = '_'.join(parts[:-4])  # Reconstruct op name  
-        shape = parts[-1]  
         if op_name not in by_op:  
             by_op[op_name] = []  
-        by_op[op_name].append((shape, lat1, lat2, change))  
+        by_op[op_name].append((lat1, lat2, change, shape, dtype))  
       
     for op_name in sorted(by_op.keys()):  
-        for shape, lat1, lat2, change in sorted(by_op[op_name]):  
+        # Print operation header  
+        print(f"\n{op_name}:")  
+        print("-" * 140)  
+          
+        # Sort by shape for consistent ordering  
+        for lat1, lat2, change, shape, dtype in sorted(by_op[op_name], key=lambda x: str(x[3])):  
             lat1_str = f"{lat1:.6f}" if lat1 is not None else "N/A"  
             lat2_str = f"{lat2:.6f}" if lat2 is not None else "N/A"  
-            change_str = f"{change:+.2f}" if lat1 is not None and lat2 is not None else "N/A"  
               
-            print(f"{op_name:<30} {shape:<25} {lat1_str:<12} {lat2_str:<12} {change_str:<12}")  
+            if lat1 is not None and lat2 is not None:  
+                change_str = f"{change:+8.2f}"  
+                # Color code for better visualization (using + for positive, - for negative)  
+                if change > 0:  
+                    change_str = f"🔴{change_str}"  
+                elif change < 0:  
+                    change_str = f"🟢{change_str}"  
+                else:  
+                    change_str = f"⚪{change_str}"  
+            else:  
+                change_str = "N/A      "  
+              
+            shape_dtype_str = format_shape_with_dtype(shape, dtype)  
+              
+            print(f"{'':<25} {lat1_str:<12} {lat2_str:<12} {change_str:<12} {shape_dtype_str:<70}")  
       
     # Summary statistics  
-    valid_changes = [change for _, (_, _, change) in comparisons.items()   
+    valid_changes = [change for _, (_, _, change, _, _) in comparisons.items()   
                     if change != -100.0 and change != 100.0]  
     if valid_changes:  
         avg_change = sum(valid_changes) / len(valid_changes)  
         max_increase = max(valid_changes)  
         max_decrease = min(valid_changes)  
           
-        print("-" * 120)  
-        print(f"Summary: {len(valid_changes)} comparisons")  
-        print(f"Average change: {avg_change:+.2f}%")  
-        print(f"Max increase: {max_increase:+.2f}%")  
-        print(f"Max decrease: {max_decrease:+.2f}%")  
+        print("\n" + "=" * 140)  
+        print(f"SUMMARY STATISTICS:")  
+        print(f"  Total comparisons: {len(valid_changes)}")  
+        print(f"  Average change: {avg_change:+8.2f}%")  
+        print(f"  Max increase:   {max_increase:+8.2f}% 🔴")  
+        print(f"  Max decrease:   {max_decrease:+8.2f}% 🟢")  
+        print("=" * 140)  
   
   
 def main():  
