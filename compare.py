@@ -137,13 +137,13 @@ def print_comparison(comparisons: Dict[str, Tuple[float, float, float, List, str
               
             if lat1 is not None and lat2 is not None:  
                 change_str = f"{change:+8.2f}"  
-                # Color code for better visualization (using + for positive, - for negative)  
+                # Intuitive arrow indicators (equal width)  
                 if change > 0:  
-                    change_str = f"🔴{change_str}"  
+                    change_str = f"↓↓↓ {change_str}"  
                 elif change < 0:  
-                    change_str = f"🟢{change_str}"  
+                    change_str = f"↑↑↑ {change_str}"  
                 else:  
-                    change_str = f"⚪{change_str}"  
+                    change_str = f"─── {change_str}"  
             else:  
                 change_str = "N/A      "  
               
@@ -163,8 +163,8 @@ def print_comparison(comparisons: Dict[str, Tuple[float, float, float, List, str
         print(f"SUMMARY STATISTICS:")  
         print(f"  Total comparisons: {len(valid_changes)}")  
         print(f"  Average change: {avg_change:+8.2f}%")  
-        print(f"  Max increase:   {max_increase:+8.2f}% 🔴")  
-        print(f"  Max decrease:   {max_decrease:+8.2f}% 🟢")  
+        print(f"  Max increase:   {max_increase:+8.2f}% ↓↓↓")  
+        print(f"  Max decrease:   {max_decrease:+8.2f}% ↑↑↑")  
         print("=" * 140)  
   
   
