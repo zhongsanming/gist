@@ -154,14 +154,14 @@ def print_comparison(comparisons: Dict[str, Tuple[float, float, float]]):
     # Summary statistics
     valid_changes = [
         change
-        for _, (_, _, change, _) in comparisons.items()
+        for _, (_, _, change) in comparisons.items()
         if change != -100.0 and change != 100.0
     ]
 
     # Top 10 performance decreases
     decreases = [
-        (key, change, parameters)
-        for key, (_, _, change, parameters) in comparisons.items()
+        (key, change)
+        for key, (_, _, change) in comparisons.items()
         if change > 0 and change != 100.0
     ]
     decreases.sort(key=lambda x: x[1], reverse=True)  # Sort by largest decrease
@@ -187,9 +187,8 @@ def print_comparison(comparisons: Dict[str, Tuple[float, float, float]]):
             )
             print("-" * 140)
 
-            for rank, ((op_name, dtype, mode, level, parameter_str), change, parameters) in enumerate(decreases[:10], 1):
-                op_name = "_".join(parts[:-4])
-
+            for rank, ((op_name, dtype, mode, level, parameter_str), change) in enumerate(decreases[:10], 1):
+                parameters = f"{dtype}_{parameter_str}"
                 print(
                     f"{rank:<6} {op_name:<25} {change:+8.2f}%{'':<4} {parameters:<70}"
                 )
