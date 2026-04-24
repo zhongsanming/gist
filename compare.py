@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3  
 """  
 Compare latencies between two benchmark runs.  
@@ -54,6 +55,45 @@ def get_result_key(result: BenchmarkResult, metric: BenchmarkMetrics) -> str:
     shape_str = str(metric.shape_detail) if metric.shape_detail else "None"  
     # Include dtype in the key for proper matching  
     return f"{result.op_name}_{result.dtype}_{result.mode}_{result.level}_{shape_str}"  
+  
+  
+def parse_key(key: str) -> Tuple[str, str, str, str, str]:  
+    """Parse the key back into its components."""  
+    # Known values for mode and level  
+    known_modes = ["kernel", "operator", "wrapper"]  
+    known_levels = ["core", "comprehensive"]  
+    known_dtypes = ["float16", "float32", "bfloat16", "int16", "int32", "bool", "cfloat"]  
+      
+    # Split by underscore  
+    parts = key.split('_')  
+      
+    # Find dtype (first known dtype in the list)  
+    dtype_idx = None  
+    for i, part in enumerate(parts):  
+        if part in known_dtypes:  
+            dtype_idx = i  
+            break  
+      
+    if dtype_idx is None:  
+        # Fallback: assume format op_dtype_mode_level_shape  
+        return parts[0], parts[1], parts[2], parts[3], '_'.join(parts[4:])  
+      
+    # Extract components  
+    op_name = '_'.join(parts[:dtype_idx])  
+    dtype = parts[dtype_idx]  
+      
+    # Mode should be right after dtype  
+    mode_idx = dtype_idx + 1  
+    mode = parts[mode_idx] if mode_idx < len(parts) else "kernel"  
+      
+    # Level should be right after mode  
+    level_idx = mode_idx + 1  
+    level = parts[level_idx] if level_idx < len(parts) else "core"  
+      
+    # Shape is everything after level  
+    shape = '_'.join(parts[level_idx + 1:]) if level_idx + 1 < len(parts) else "None"  
+      
+    return op_name, dtype, mode, level, shape  
   
   
 def format_shape_with_dtype(shape_detail: List, dtype: str) -> str:  
@@ -119,11 +159,11 @@ def print_comparison(comparisons: Dict[str, Tuple[float, float, float, List, str
     # Group by operation using regular dict  
     by_op = {}  
     for key, (lat1, lat2, change, shape, dtype) in comparisons.items():  
-        parts = key.split('_')  
-        op_name = '_'.join(parts[:-4])  # Reconstruct op name  
+        # Parse the key to extract op_name correctly  
+        op_name, _, _, _, _ = parse_key(key)  
         if op_name not in by_op:  
             by_op[op_name] = []  
-        by_op[op_name].append((lat1, lat2, change, shape, dtype))  
+        by_op[op_name].append((key, lat1, lat2, change, shape, dtype))  
       
     for op_name in sorted(by_op.keys()):  
         # Print operation header  
@@ -131,7 +171,7 @@ def print_comparison(comparisons: Dict[str, Tuple[float, float, float, List, str
         print("-" * 140)  
           
         # Sort by shape for consistent ordering  
-        for lat1, lat2, change, shape, dtype in sorted(by_op[op_name], key=lambda x: str(x[3])):  
+        for key, lat1, lat2, change, shape, dtype in sorted(by_op[op_name], key=lambda x: str(x[4])):  
             lat1_str = f"{lat1:.6f}" if lat1 is not None else "N/A"  
             lat2_str = f"{lat2:.6f}" if lat2 is not None else "N/A"  
               
@@ -154,6 +194,12 @@ def print_comparison(comparisons: Dict[str, Tuple[float, float, float, List, str
     # Summary statistics  
     valid_changes = [change for _, (_, _, change, _, _) in comparisons.items()   
                     if change != -100.0 and change != 100.0]  
+      
+    # Top 10 performance decreases  
+    decreases = [(key, change) for key, (_, _, change, _, _) in comparisons.items()   
+                if change > 0 and change != 100.0]  
+    decreases.sort(key=lambda x: x[1], reverse=True)  # Sort by largest decrease  
+      
     if valid_changes:  
         avg_change = sum(valid_changes) / len(valid_changes)  
         max_increase = max(valid_changes)  
@@ -165,6 +211,23 @@ def print_comparison(comparisons: Dict[str, Tuple[float, float, float, List, str
         print(f"  Average change: {avg_change:+8.2f}%")  
         print(f"  Max increase:   {max_increase:+8.2f}% ↓↓↓")  
         print(f"  Max decrease:   {max_decrease:+8.2f}% ↑↑↑")  
+          
+        # Top 10 performance decreases  
+        if decreases:  
+            print(f"\nTOP 10 PERFORMANCE DECREASES:")  
+            print("-" * 140)  
+            print(f"{'Rank':<6} {'Operation':<25} {'Change (%)':<12} {'Shape & Dtype':<70}")  
+            print("-" * 140)  
+              
+            for rank, (key, change) in enumerate(decreases[:10], 1):  
+                # Parse the key to extract op_name correctly  
+                op_name, _, _, _, shape_str = parse_key(key)  
+                # Extract dtype from the parsed key  
+                _, dtype, _, _, _ = parse_key(key)  
+                shape_dtype_str = format_shape_with_dtype(eval(shape_str), dtype)  
+                  
+                print(f"{rank:<6} {op_name:<25} {change:+8.2f}%{'':<4} {shape_dtype_str:<70}")  
+          
         print("=" * 140)  
   
   
